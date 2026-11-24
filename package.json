@@ -17,6 +17,7 @@
   "scripts": {
     "start": "node bridge.js",
     "test": "node secure-folder-mcp/test_client.js",
+    "test:port": "node --test secure-folder-mcp/test_bridge_port.js",
     "test:host-binding": "node --test secure-folder-mcp/test_host_binding.js",
     "test:docker": "node --test secure-folder-mcp/test_docker.js"
   },

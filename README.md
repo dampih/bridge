@@ -122,9 +122,20 @@ To add Yarn or Corepack too, add `RUN npm install --global yarn corepack` before
 | Command | Description |
 | :--- | :--- |
 | `bridge [folder]` | Start Bridge for a project folder (opens the folder navigator if omitted). |
+| `bridge [folder] --port <PORT>` | Start on a specific local port (1–65535); the port must be free. |
+| `bridge [folder] --quick-tunnel` | Use a temporary Cloudflare quick tunnel, even if a named tunnel is configured. |
 | `bridge . --mode=<mode>` | Start with an approval mode: `turbo`, `review`, `default` or `auto` (see [Approval Modes](#approval-modes)). |
 | `bridge setup` | One-time setup for a fixed URL via a Cloudflare named tunnel. |
 | `bridge rotate-token` | Replace the saved auth token. Connected AI clients must re-paste the new URL. |
+
+Run multiple project instances by assigning a different port to each one. Each default quick tunnel gets its own URL:
+
+```bash
+bridge ./project-a --port 3101
+bridge ./project-b --port 3102
+```
+
+If a named tunnel is configured, it uses the saved Cloudflare ingress at `localhost:3000`; use `--port 3000` for that tunnel or `--quick-tunnel --port <PORT>` to create a separate quick tunnel without changing the saved setup. Bridge will not stop another process when the requested port is occupied.
 
 ---
 
@@ -253,7 +264,7 @@ When Bridge asks, the request appears in the dashboard with the full command. Pr
 
 * **Gemini keeps showing "Connecting to Bridge":** Check `~/.bridge/logs/server_requests.log`. If no new lines appear, the request never left Gemini, so resend your prompt. A `[CLIENT-ABORT]` or `[SSE-CLOSE]` line shows the connection dropped and why.
 * **Gemini keeps asking for permission:** See the Gemini tip under [Connecting to Any AI Client](#connecting-to-any-ai-client).
-* **Port 3000 is busy:** Quick tunnels pick a free port from 3001–3020 automatically. Named tunnels need port 3000; Bridge only stops old Bridge servers on it and never other apps.
+* **Port 3000 is busy:** Quick tunnels pick a free port from 3001–3020 automatically. Named tunnels need port 3000 unless started with `--quick-tunnel`. Use `--port <PORT>` to select another free port; Bridge never stops the current port owner.
 * **Update banner:** Bridge checks npm on startup and shows an update only when a newer version exists. Upgrade with `npm install -g @markmayandi/bridge@latest`.
 
 ---

@@ -12,6 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const https = require('https');
+const net = require('net');
 const os = require('os');
 const readline = require('readline');
 const crypto = require('crypto');
@@ -393,7 +394,33 @@ const bar = THIN_BAR;
 const thickBar = THICK_BAR;
 
 const isLaunchFromBat = process.argv.includes('--launch');
-const rawCliArgs = process.argv.slice(2).filter(a => !a.startsWith('--'));
+const cliArgs = process.argv.slice(2);
+let requestedPort = null;
+let forceQuickTunnel = false;
+const positionalArgs = [];
+for (let i = 0; i < cliArgs.length; i++) {
+  const arg = cliArgs[i];
+  if (arg === '--port') {
+    const value = cliArgs[++i];
+    if (!value || !/^\d+$/.test(value) || Number(value) < 1 || Number(value) > 65535) {
+      console.error('Invalid --port value. Use a port number from 1 to 65535.');
+      process.exit(1);
+    }
+    requestedPort = Number(value);
+  } else if (arg.startsWith('--port=')) {
+    const value = arg.slice('--port='.length);
+    if (!/^\d+$/.test(value) || Number(value) < 1 || Number(value) > 65535) {
+      console.error('Invalid --port value. Use a port number from 1 to 65535.');
+      process.exit(1);
+    }
+    requestedPort = Number(value);
+  } else if (arg === '--quick-tunnel') {
+    forceQuickTunnel = true;
+  } else if (!arg.startsWith('--')) {
+    positionalArgs.push(arg);
+  }
+}
+const rawCliArgs = positionalArgs;
 const subcommand = rawCliArgs[0] ? rawCliArgs[0].toLowerCase() : '';
 const bridgeConfig = readBridgeConfig();
 let activeProjectDir = rawCliArgs[0] && subcommand !== 'setup' ? path.resolve(rawCliArgs[0]) : null;
@@ -504,6 +531,7 @@ function pushLog(line) {
 function startServerProcess() {
   serverStatus = serverRestarts > 0 ? 'restarting' : 'starting';
   serverStartedAt = Date.now();
+  let serverBindFailed = false;
   const child = spawn(process.execPath, [serverScript, activeProjectDir, '--http', String(bridgePort), '--token', bridgeAuthToken, '--approval-mode', approvalMode], {
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'], // ipc channel carries delete/approval prompts
     windowsHide: true
@@ -515,6 +543,7 @@ function startServerProcess() {
     const lines = chunk.toString().split('\n').filter(l => l.trim());
     lines.forEach(l => {
       if (/listening on/i.test(l)) serverStatus = 'online';
+      if (/EADDRINUSE|address already in use/i.test(l)) serverBindFailed = true;
       pushLog(l);
     });
     if (showLiveLogs || /listening on/i.test(chunk.toString())) renderDashboard();
@@ -523,6 +552,12 @@ function startServerProcess() {
 
   child.on('exit', (code, signal) => {
     if (isShuttingDown || serverProcess !== child) return;
+    if (serverBindFailed) {
+      pushLog(`Port ${bridgePort} became unavailable before the MCP server could bind; stopping this Bridge instance.`);
+      setFlash(`  ${C.redBold}● [PORT BUSY]${C.reset} ${C.white}Port ${bridgePort} is already in use. Stop Bridge and choose another with --port.${C.reset}`, 15000);
+      cleanupAndExit();
+      return;
+    }
     // Pending approvals belonged to the dead process; drop them.
     approvalQueue.length = 0;
     // Reset the backoff if the server had been healthy for a minute.
@@ -539,7 +574,7 @@ function startServerProcess() {
     pushLog(`MCP server exited (${code ?? signal}); restarting in ${Math.round(delay / 100) / 10}s...`);
     setFlash(`  ${C.redBold}● [SERVER RESTARTING]${C.reset} ${C.white}MCP server stopped unexpectedly. Restarting...${C.reset}`, Math.max(3000, delay));
     serverRestartTimer = setTimeout(() => {
-      freePort(bridgePort);
+      serverBindFailed = false;
       startServerProcess();
       renderDashboard();
     }, delay);
@@ -609,50 +644,25 @@ function copyToClipboard(text) {
   return false;
 }
 
-// Returns the PIDs listening on a local port, with their command lines.
-function getPortOwners(port) {
-  try {
-    if (process.platform === 'win32') {
-      const ps = `Get-NetTCPConnection -State Listen -LocalPort ${port} -ErrorAction SilentlyContinue | ForEach-Object { $p = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $_.OwningProcess); '' + $_.OwningProcess + '|' + $p.CommandLine }`;
-      const out = execSync(`powershell -NoProfile -NonInteractive -Command "${ps}"`, { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).toString();
-      return out.split(/\r?\n/).filter(Boolean).map(l => {
-        const i = l.indexOf('|');
-        return { pid: Number(l.slice(0, i)), cmd: l.slice(i + 1) };
-      }).filter(o => o.pid > 0);
-    }
-    const out = execSync(`lsof -nP -iTCP:${port} -sTCP:LISTEN -t`, { stdio: ['ignore', 'pipe', 'ignore'] }).toString();
-    return out.split(/\s+/).filter(Boolean).map(pid => {
-      let cmd = '';
-      try { cmd = execSync(`ps -o args= -p ${pid}`, { stdio: ['ignore', 'pipe', 'ignore'] }).toString(); } catch (e) {}
-      return { pid: Number(pid), cmd };
+function isPortAvailable(port) {
+  return new Promise(resolve => {
+    const probe = net.createServer();
+    probe.once('error', () => resolve(false));
+    probe.listen(port, process.env.BRIDGE_HOST || '127.0.0.1', () => {
+      probe.close(() => resolve(true));
     });
-  } catch (e) {
-    return [];
-  }
+  });
 }
 
-const isBridgeServerCmd = (cmd) => /secure-folder-mcp[\\/]+server\.js/i.test(cmd || '');
-
-// Free a port only if it is held by a stale Bridge server. Never kill the user's own apps
-// (port 3000 is the default for React/Next/Express dev servers). Returns true if the port is free.
-function freePort(port) {
-  const owners = getPortOwners(port);
-  let blocked = false;
-  for (const o of owners) {
-    if (isBridgeServerCmd(o.cmd)) {
-      try { process.kill(o.pid); } catch (e) {}
-    } else {
-      blocked = true;
-    }
+async function choosePort(useNamedTunnel, preferredPort = null) {
+  if (preferredPort !== null) {
+    if (useNamedTunnel && preferredPort !== 3000) return null;
+    return await isPortAvailable(preferredPort) ? preferredPort : null;
   }
-  return !blocked;
-}
-
-function choosePort(useNamedTunnel) {
-  if (freePort(3000)) return 3000;
+  if (await isPortAvailable(3000)) return 3000;
   if (useNamedTunnel) return null; // the named tunnel's ingress points at localhost:3000
   for (let p = 3001; p <= 3020; p++) {
-    if (getPortOwners(p).length === 0) return p;
+    if (await isPortAvailable(p)) return p;
   }
   return null;
 }
@@ -1335,17 +1345,20 @@ async function startBridge() {
     }
   }
 
-  // Step 3: Pick the port (only a stale Bridge server is ever stopped to free it)
-  const useNamedTunnel = Boolean(bridgeConfig.tunnelToken);
-  const port = choosePort(useNamedTunnel);
+  // Step 3: Pick the port without stopping another Bridge instance or application.
+  const useNamedTunnel = Boolean(bridgeConfig.tunnelToken) && !forceQuickTunnel;
+  const port = await choosePort(useNamedTunnel, requestedPort);
   if (!port) {
     process.stdout.write('\x1b[?1049l\x1b[?25h');
-    const owners = getPortOwners(3000).map(o => `PID ${o.pid}: ${o.cmd || '(unknown)'}`).join('\n    ');
-    console.error('\n' + C.redBold + '● [PORT BUSY] ' + C.reset + 'Port 3000 is used by another program, and Bridge will not stop it:');
-    console.error('    ' + owners);
-    console.error(C.slate + (useNamedTunnel
-      ? 'Your named tunnel points to localhost:3000. Stop that program, then start Bridge again.'
-      : 'No free port found between 3000 and 3020.') + C.reset + '\n');
+    const targetPort = requestedPort || 3000;
+    console.error('\n' + C.redBold + '● [PORT BUSY] ' + C.reset + `Port ${targetPort} is unavailable; Bridge will not stop its current owner.`);
+    console.error(C.slate + (useNamedTunnel && requestedPort && requestedPort !== 3000
+      ? 'Your named tunnel ingress points to localhost:3000. Use --port 3000 or switch to a quick tunnel.'
+      : useNamedTunnel
+        ? 'Your named tunnel points to localhost:3000. Stop that program, then start Bridge again.'
+        : requestedPort
+          ? 'Choose another port with --port <PORT>.'
+          : 'No free port found between 3000 and 3020.') + C.reset + '\n');
     process.exit(1);
   }
   bridgePort = port;
