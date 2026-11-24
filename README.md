@@ -150,9 +150,17 @@ npm --prefix desktop ci
 npm --prefix desktop start
 ```
 
-Choose a project folder and a free port (for example, `3101`), then click **Start public tunnel**. Repeat with another folder and port (for example, `3102`). When an instance is online, copy its authenticated MCP URL and paste it into the corresponding AI connector. Keep the URL private: it includes that instance’s access token. Each start creates a new temporary URL. Desktop does not use saved named tunnels.
+Choose a project folder and a free port (for example, `3101`), then click **Start public tunnel**. Repeat with another folder and port (for example, `3102`). When an instance is online, copy its authenticated MCP URL and paste it into the corresponding AI connector. Keep the URL private: it includes that instance’s access token. By default, each Quick Tunnel start creates a temporary URL and a new MCP token.
 
-Use **Project profiles** to save a name, folder, and port for a project you use often. Profiles are restored when you reopen the app, but never start automatically. Click **Start public tunnel** on a saved profile to launch it. Edits and deletions affect only the saved profile, not a running instance. Profiles do not store URLs, tokens, or approval modes.
+Use **Project profiles** to save a name, folder, and port for a project you use often. Profiles are restored when you reopen the app, but never start automatically. Click **Start public tunnel** on a saved profile to launch it. Edits and deletions affect only the saved profile, not a running instance. Profiles do not store approval modes.
+
+### Optional: Named Tunnel per project profile
+
+1. In Cloudflare Zero Trust, create a **remotely managed tunnel** for this project and add a public hostname. Set its service to `http://127.0.0.1:<profile-port>` (for example, `http://127.0.0.1:3101`). Do not append `/mcp` to the service address.
+2. In Bridge Desktop, edit or create a project profile, select **Named Tunnel**, enter the HTTPS hostname (for example, `https://frontend-mcp.example.com`), and paste only the Cloudflare connector token, not the installation command. Save and start the profile manually.
+3. When the connector registers, click **Copy MCP URL**. The copied URL and its MCP token remain stable across restarts of that saved Named profile. Connector registration does not verify DNS or ingress; if the AI cannot connect, check the public hostname and the service port in Cloudflare.
+
+The **Cloudflare connector token** starts `cloudflared`; the distinct **MCP token** authenticates your AI client. Both are encrypted using the OS credential protection exposed by Electron, never stored as plaintext. When editing, leave the connector field blank to keep its token, or paste a replacement and restart the instance to use it. Changing the port also requires updating the Cloudflare service. Use a different Named Tunnel and hostname for each project, and don't run another connector for the same tunnel against a different workspace. Switching to Quick or deleting the profile removes its saved credentials but does not stop a running instance or revoke credentials in Cloudflare. Quick Tunnel remains available without secure storage.
 
 When Bridge Desktop is not focused, it can show a Windows notification for a new approval request. Click it to return to the corresponding instance card; the notification itself cannot approve or deny anything. If Windows suppresses notifications (for example, due to notification settings or Do Not Disturb), review pending requests in the dashboard.
 

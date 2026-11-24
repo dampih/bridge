@@ -2,7 +2,7 @@
 
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { app, BrowserWindow, clipboard, dialog, ipcMain, Notification } = require('electron');
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Notification, safeStorage } = require('electron');
 const { InstanceManager } = require('./instances');
 const { ProfileStore } = require('./profiles');
 const { createApprovalNotifier } = require('./notifications');
@@ -41,7 +41,7 @@ function handle(action, callback) {
 
 app.whenReady().then(() => {
   if (process.platform === 'win32') app.setAppUserModelId(process.execPath);
-  const profiles = new ProfileStore(path.join(app.getPath('userData'), 'project-profiles.json'));
+  const profiles = new ProfileStore(path.join(app.getPath('userData'), 'project-profiles.json'), safeStorage);
   handle('pick-folder', async () => {
     const result = await dialog.showOpenDialog(window, { title: 'Choose a Bridge project', properties: ['openDirectory'] });
     if (result.canceled) return null;
@@ -57,10 +57,7 @@ app.whenReady().then(() => {
   handle('list-profiles', () => profiles.list());
   handle('save-profile', data => profiles.save(data, folder => selectedFolders.has(folder)));
   handle('delete-profile', id => profiles.delete(id));
-  handle('start-profile', id => {
-    const { folder, port, name } = profiles.get(id);
-    return manager.start({ folder, port, profileName: name });
-  });
+  handle('start-profile', id => manager.start(profiles.forStart(id)));
   handle('stop', id => manager.stop(id));
   handle('copy-url', id => { clipboard.writeText(manager.urlForCopy(id)); });
   handle('answer-approval', data => manager.answerApproval(data));

@@ -64,14 +64,19 @@ test('desktop manages two isolated MCP servers, approvals, conflicts and shutdow
   process.env.HOME = home;
   process.env.USERPROFILE = home;
   const approvalEvents = [];
+  const namedTunnel = { publicUrl: 'https://frontend.example.com', connectorToken: 'test-connector-secret', mcpToken: 'a'.repeat(48) };
   const manager = new InstanceManager({
     onApproval: target => approvalEvents.push(target),
     resolveTunnel: () => 'mock-cloudflared',
-    startTunnel(binary, args) {
+    startTunnel(binary, args, connectorToken) {
       assert.equal(binary, 'mock-cloudflared');
-      const label = `test-${tunnels.length + 1}`;
-      const child = spawn(process.execPath, ['-e', `console.log('https://${label}.trycloudflare.com'); setInterval(() => {}, 1000)`],
-        { stdio: ['ignore', 'pipe', 'pipe'] });
+      assert.equal(connectorToken, args.at(-1) === 'run' ? namedTunnel.connectorToken : undefined);
+      const script = connectorToken
+        ? `console.log(process.env.TEST_CONNECTOR); process.stdin.once('data', () => console.log('INF Registered tunnel connection'));`
+        : `console.log('https://test-quick.trycloudflare.com'); setInterval(() => {}, 1000)`;
+      const child = spawn(process.execPath, ['-e', script], {
+        env: { ...process.env, TEST_CONNECTOR: connectorToken ?? '' }, stdio: ['pipe', 'pipe', 'pipe']
+      });
       tunnels.push({ args, child, closed: once(child, 'close') });
       return child;
     }
@@ -95,22 +100,34 @@ test('desktop manages two isolated MCP servers, approvals, conflicts and shutdow
     return item.status === 'online' && item;
   });
   assert.throws(() => manager.start({ folder: folders[0], port: 0 }), /1 to 65535/);
-  const a = manager.start({ folder: folders[0], port: portA, profileName: 'Frontend' });
+  const namedOptions = { folder: folders[0], port: portA, profileName: 'Frontend', namedTunnel };
+  const a = manager.start(namedOptions);
+  assert.throws(() => manager.start({ ...namedOptions, port: portB }), /named tunnel or hostname is already in use/);
   assert.throws(() => manager.start({ folder: folders[1], port: portA }), /already assigned/);
   const b = manager.start({ folder: folders[1], port: portB });
   const busy = manager.start({ folder: folders[0], port: busyPort });
+  const namedChild = await waitFor(() => tunnels.find(item => item.args.at(-1) === 'run'));
+  assert.equal(get(a).status, 'starting-tunnel');
+  assert.throws(() => manager.urlForCopy(a), /does not have an active URL/);
+  namedChild.child.stdin.write('register');
   await Promise.all([online(a), online(b), waitFor(() => get(busy).status === 'failed')]);
+  assert.equal(get(a).tunnelMode, 'named');
+  assert.ok(get(a).logs.some(line => line.includes('[REDACTED]')));
+  assert.ok(!JSON.stringify(manager.list()).includes(namedTunnel.connectorToken));
   assert.equal(get(a).profileName, 'Frontend');
   assert.equal(get(a).approvalMode, 'review');
   assert.equal(get(b).approvalMode, 'review');
   assert.throws(() => manager.setApprovalMode({ instanceId: a, mode: 'invalid' }), /Invalid approval mode/);
   assert.match(get(busy).error, /already in use/);
   assert.ok(reservations[2].listening);
-  assert.deepEqual(tunnels.map(({ args }) => args.at(-1)).sort(), [localUrl(portA, ''), localUrl(portB, '')].sort());
+  assert.deepEqual(namedChild.args, ['tunnel', '--no-autoupdate', 'run']);
+  assert.deepEqual(tunnels.map(({ args }) => args.at(-1)).sort(), [localUrl(portB, ''), 'run']);
   const urlA = new URL(manager.urlForCopy(a));
   const urlB = new URL(manager.urlForCopy(b));
   const tokenA = urlA.searchParams.get('token');
   const tokenB = urlB.searchParams.get('token');
+  assert.equal(urlA.origin, namedTunnel.publicUrl);
+  assert.equal(tokenA, namedTunnel.mcpToken);
   assert.notEqual(urlA.origin, urlB.origin);
   assert.match(tokenA, /^[a-f0-9]{48}$/);
   assert.match(tokenB, /^[a-f0-9]{48}$/);
@@ -168,7 +185,13 @@ test('desktop manages two isolated MCP servers, approvals, conflicts and shutdow
   await manager.stop(a);
   assert.equal(get(a).status, 'stopped');
   assert.equal((await status(portB, tokenB)).status, 200);
+  const restarted = manager.start(namedOptions);
+  const restartChild = await waitFor(() => tunnels.find(item => item !== namedChild && item.args.at(-1) === 'run'));
+  restartChild.child.stdin.write('register');
+  await online(restarted);
+  assert.equal(manager.urlForCopy(restarted), urlA.href);
   await manager.shutdown();
+  assert.equal(get(restarted).status, 'stopped');
   assert.equal(get(b).status, 'stopped');
   await Promise.all(tunnels.map(tunnel => tunnel.closed));
   await assert.rejects(status(portB, tokenB));

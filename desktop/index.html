@@ -57,6 +57,26 @@
               <label class="field-label" for="profile-port">Local port</label>
               <input id="profile-port" name="port" type="number" min="1" max="65535" step="1" inputmode="numeric" value="3101" required>
             </div>
+            <div class="field">
+              <label class="field-label" for="profile-tunnel-mode">Tunnel type</label>
+              <select id="profile-tunnel-mode" name="tunnelMode" aria-controls="profile-named-fields">
+                <option value="quick">Quick (temporary URL)</option>
+                <option value="named">Named (your configured hostname)</option>
+              </select>
+            </div>
+            <div class="named-fields" id="profile-named-fields" hidden>
+              <div class="field">
+                <label class="field-label" for="profile-public-url">Public HTTPS origin</label>
+                <input id="profile-public-url" name="publicUrl" type="url" placeholder="https://bridge.example.com" aria-describedby="profile-public-url-help" disabled>
+                <p class="field-help" id="profile-public-url-help">Use the configured HTTPS hostname without a port, path, query, or fragment.</p>
+              </div>
+              <div class="field">
+                <label class="field-label" for="profile-connector-token">Connector token</label>
+                <input id="profile-connector-token" name="connectorToken" type="password" autocomplete="new-password" aria-describedby="profile-connector-token-help" disabled>
+                <p class="field-help" id="profile-connector-token-help"></p>
+              </div>
+              <p class="field-help">In Cloudflare, route the public hostname to <code class="local-route" id="profile-local-route"></code> (Bridge serves MCP at <code>/mcp</code>).</p>
+            </div>
             <div class="profile-actions">
               <button class="button button-primary" id="save-profile" type="submit" aria-disabled="true">Save profile</button>
               <button class="button button-secondary" id="cancel-profile" type="button">Cancel</button>
@@ -71,7 +91,7 @@
           <div class="section-heading setup-heading">
             <p class="eyebrow">Setup</p>
             <h2 id="setup-title">New tunnel</h2>
-            <p>Pick a workspace and assign it a local port.</p>
+            <p>Pick a workspace and local port to start a quick tunnel. To use a named tunnel, configure a saved profile.</p>
           </div>
           <form id="launch-form">
             <div class="field">
@@ -121,7 +141,8 @@
     <li class="profile-card">
       <h3 class="profile-name"></h3>
       <p class="profile-location"></p>
-      <p class="field-help">Local port: <span class="profile-port"></span></p>
+      <p class="field-help">Local port: <span class="profile-port"></span> · <span class="profile-tunnel-mode"></span></p>
+      <p class="field-help profile-public-origin" hidden></p>
       <div class="profile-actions">
         <button class="button button-primary start-profile" type="button" aria-describedby="profile-public-notice">Start public tunnel</button>
         <button class="button button-secondary edit-profile" type="button">Edit</button>
@@ -140,7 +161,11 @@
         </div>
         <span class="status-badge"></span>
       </div>
-      <dl class="instance-meta"><div><dt>Local port</dt><dd class="instance-port"></dd></div></dl>
+      <dl class="instance-meta">
+        <div><dt>Local port</dt><dd class="instance-port"></dd></div>
+        <div class="instance-route-row" hidden><dt>Expected local route</dt><dd><code class="local-route instance-route"></code></dd></div>
+      </dl>
+      <p class="field-help instance-ingress" hidden>Bridge has not verified public ingress. Check that your Cloudflare public hostname routes to the local service above.</p>
       <p class="feedback instance-error" hidden></p>
       <div class="instance-actions">
         <button class="button button-secondary copy-url" type="button" hidden>Copy MCP URL</button>

@@ -19,6 +19,12 @@ const profileNameInput = $('#profile-name');
 const profileFolderOutput = $('#profile-folder');
 const profileFolderButton = $('#pick-profile-folder');
 const profilePortInput = $('#profile-port');
+const profileTunnelModeInput = $('#profile-tunnel-mode');
+const profileNamedFields = $('#profile-named-fields');
+const profilePublicUrlInput = $('#profile-public-url');
+const profileConnectorTokenInput = $('#profile-connector-token');
+const profileConnectorTokenHelp = $('#profile-connector-token-help');
+const profileLocalRoute = $('#profile-local-route');
 const saveProfileButton = $('#save-profile');
 const cancelProfileButton = $('#cancel-profile');
 const profileFormFeedback = $('#profile-form-feedback');
@@ -62,6 +68,7 @@ let pendingInstanceFocus;
 let profilesReady = false;
 let editingProfileId;
 let profileFolder = null;
+let hasSavedConnectorToken = false;
 let profilePicking = false;
 let profileBusy = false;
 let editorReturnFocus;
@@ -70,7 +77,7 @@ function safeText(value) {
   if (typeof value !== 'string' && typeof value !== 'number') return '';
   // Public snapshots must already be scrubbed; also mask common credential forms here.
   return String(value)
-    .replace(/\b((?:auth[_-]?token|access[_-]?token|tunnel[_-]?token|token)["']?\s*[:=]\s*["']?)[^\s&#"'<>]+/gi, '$1[redacted]')
+    .replace(/\b((?:auth[_-]?token|access[_-]?token|tunnel[_-]?token|connector[_-]?token|token)["']?\s*[:=]\s*["']?)[^\s&#"'<>]+/gi, '$1[redacted]')
     .replace(/\b(Bearer\s+)[\w.+=/-]+/gi, '$1[redacted]')
     .replace(/\b[a-f\d]{32,}\b/gi, '[redacted]');
 }
@@ -208,6 +215,41 @@ function updateProfileFolder() {
   text(profileFolderButton, profilePicking ? 'Choosing folder…' : profileFolder ? 'Change folder' : 'Choose folder');
 }
 
+function localRoute(port) {
+  return Number.isInteger(port) && port >= 1 && port <= maxPort ? `http://127.0.0.1:${port}` : '';
+}
+
+function httpsOrigin(value) {
+  const input = value.trim();
+  if (!/^https:\/\/[a-z0-9.-]+\/?$/i.test(input)) return '';
+  try {
+    const url = new URL(input);
+    const labels = url.hostname.split('.');
+    if (labels.length > 1 && labels.every(label => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label)) &&
+        !/^\d+(?:\.\d+){3}$/.test(url.hostname)) return url.origin;
+  } catch {
+    // Invalid URL.
+  }
+  return '';
+}
+
+function updateProfileLocalRoute() {
+  text(profileLocalRoute, localRoute(profilePortInput.valueAsNumber) || 'http://127.0.0.1:<local port>');
+}
+
+function updateProfileTunnelFields() {
+  const named = profileTunnelModeInput.value === 'named';
+  profileNamedFields.hidden = !named;
+  profilePublicUrlInput.disabled = !named;
+  profilePublicUrlInput.required = named;
+  profileConnectorTokenInput.disabled = !named;
+  if (!named) profileConnectorTokenInput.value = '';
+  text(profileConnectorTokenHelp, hasSavedConnectorToken
+    ? 'A token is saved. Leave this blank to keep it.'
+    : 'Enter the connector token for this named tunnel.');
+  updateProfileLocalRoute();
+}
+
 function showProfileEditor(profile, trigger) {
   if (!profilesReady || profileBusy || !profileForm.hidden) return;
   editorReturnFocus = trigger;
@@ -215,6 +257,11 @@ function showProfileEditor(profile, trigger) {
   profileFolder = profile?.folder ?? null;
   profileNameInput.value = profile?.name ?? '';
   profilePortInput.value = String(profile?.port ?? nextAvailablePort(defaultPort) ?? defaultPort);
+  profileTunnelModeInput.value = profile?.tunnelMode === 'named' ? 'named' : 'quick';
+  profilePublicUrlInput.value = profile?.tunnelMode === 'named' ? profile.publicUrl ?? '' : '';
+  profileConnectorTokenInput.value = '';
+  hasSavedConnectorToken = profile?.hasConnectorToken === true;
+  updateProfileTunnelFields();
   text($('#profile-form-title'), profile ? 'Edit profile' : 'New profile');
   updateProfileFolder();
   message(profilesFeedback, '');
@@ -226,6 +273,7 @@ function showProfileEditor(profile, trigger) {
 }
 
 function closeProfileEditor() {
+  profileConnectorTokenInput.value = '';
   profileForm.hidden = true;
   newProfileButton.setAttribute('aria-expanded', 'false');
   const trigger = editorReturnFocus?.isConnected ? editorReturnFocus : newProfileButton;
@@ -247,6 +295,12 @@ function renderProfiles(profiles) {
     text(heading, name);
     text($('.profile-location', root), safeText(profile.folder));
     text($('.profile-port', root), safeText(profile.port));
+    const named = profile.tunnelMode === 'named';
+    text($('.profile-tunnel-mode', root), named ? 'Named tunnel' : 'Quick tunnel');
+    const origin = named && typeof profile.publicUrl === 'string' ? httpsOrigin(profile.publicUrl) : '';
+    const originOutput = $('.profile-public-origin', root);
+    text(originOutput, origin ? `Public origin: ${origin}` : '');
+    originOutput.hidden = !origin;
     for (const [action, button] of [['start', start], ['edit', edit], ['delete', remove]]) {
       button.id = `profile-${action}-${index}`;
       button.setAttribute('aria-labelledby', `${button.id} ${heading.id}`);
@@ -303,6 +357,12 @@ async function deleteSavedProfile(id, name, feedback) {
   }
 }
 
+profileTunnelModeInput.addEventListener('change', () => {
+  updateProfileTunnelFields();
+  message(profileFormFeedback, '');
+});
+profilePortInput.addEventListener('input', updateProfileLocalRoute);
+
 newProfileButton.addEventListener('click', () => showProfileEditor(null, newProfileButton));
 cancelProfileButton.addEventListener('click', () => {
   if (!profileBusy && !profilePicking) closeProfileEditor();
@@ -340,7 +400,24 @@ profileForm.addEventListener('submit', async (event) => {
     (!name ? profileNameInput : profileFolderButton).focus();
     return;
   }
-  const data = { name, folder: profileFolder, port: profilePortInput.valueAsNumber };
+  const tunnelMode = profileTunnelModeInput.value === 'named' ? 'named' : 'quick';
+  const data = { name, folder: profileFolder, port: profilePortInput.valueAsNumber, tunnelMode };
+  if (tunnelMode === 'named') {
+    data.publicUrl = httpsOrigin(profilePublicUrlInput.value);
+    if (!data.publicUrl) {
+      message(profileFormFeedback, 'Enter an HTTPS public hostname without credentials, a port, path, query, or fragment.');
+      profilePublicUrlInput.focus();
+      return;
+    }
+    const connectorToken = profileConnectorTokenInput.value.trim();
+    if (!connectorToken && !hasSavedConnectorToken) {
+      message(profileFormFeedback, 'Enter the connector token for this named tunnel.');
+      profileConnectorTokenInput.focus();
+      return;
+    }
+    if (connectorToken) data.connectorToken = connectorToken;
+  }
+  profileConnectorTokenInput.value = '';
   if (editingProfileId !== undefined) data.id = editingProfileId;
   profileBusy = true;
   updateProfileControls();
@@ -479,6 +556,9 @@ function makeCard(instance) {
     folder: $('.instance-folder', root),
     status: $('.status-badge', root),
     port: $('.instance-port', root),
+    routeRow: $('.instance-route-row', root),
+    route: $('.instance-route', root),
+    ingress: $('.instance-ingress', root),
     error: $('.instance-error', root),
     actions: $('.instance-actions', root),
     copy: $('.copy-url', root),
@@ -510,17 +590,27 @@ function makeCard(instance) {
   return card;
 }
 
+function statusLabel(instance, state = instance.status) {
+  if (state === 'online' && instance.tunnelMode === 'named') return 'Connector ready';
+  return statuses.get(state) || 'Unknown';
+}
+
 function renderCard(card) {
   const { instance } = card;
   const state = card.stopping && stoppable.has(instance.status) ? 'stopping' : instance.status;
   const folder = safeText(instance.folder);
+  const named = instance.tunnelMode === 'named';
+  const route = named ? localRoute(instance.port) : '';
   const copyVisible = state === 'online' && Boolean(instance.publicUrl);
   const stopVisible = stoppable.has(state) || state === 'stopping';
   text(card.name, safeText(instance.profileName) || folderName(folder));
   text(card.folder, folder || 'Folder unavailable');
   text(card.port, safeText(instance.port));
-  text(card.status, statuses.get(state) || 'Unknown');
-  card.status.dataset.state = statuses.has(state) ? state : 'unknown';
+  text(card.status, statusLabel(instance, state));
+  card.status.dataset.state = named && state === 'online' ? 'connector-ready' : statuses.has(state) ? state : 'unknown';
+  text(card.route, route);
+  card.routeRow.hidden = !route;
+  card.ingress.hidden = !named || state !== 'online';
   message(card.error, safeText(instance.error?.message ?? instance.error));
   setActionVisibility(card.copy, copyVisible, card.root);
   setActionVisibility(card.stop, stopVisible, card.root);
@@ -565,7 +655,9 @@ async function copyUrl(card) {
     message(card.feedback, 'MCP URL copied to the clipboard.', true);
   } catch (error) {
     // Do not show clipboard errors that could include the authenticated URL.
-    message(card.feedback, 'Could not copy the MCP URL. Try again while the tunnel is online.');
+    message(card.feedback, card.instance.tunnelMode === 'named'
+      ? 'Could not copy the MCP URL. Try again when the connector is ready.'
+      : 'Could not copy the MCP URL. Try again while the tunnel is online.');
   } finally {
     card.copying = false;
     renderCard(card);
@@ -617,7 +709,8 @@ function applySnapshot(instances) {
     card.instance = instance;
     renderCard(card);
     if (snapshotReceived && prevStatus !== instance.status) {
-      changes.push(`Tunnel on port ${safeText(instance.port)}: ${statuses.get(instance.status) || 'Unknown'}.`);
+      const unverified = instance.tunnelMode === 'named' && instance.status === 'online' ? ' Public ingress has not been verified.' : '';
+      changes.push(`Tunnel on port ${safeText(instance.port)}: ${statusLabel(instance)}.${unverified}`);
     }
     if (card.approvals.size > prevApprovals) changes.push(`New approval requests on port ${safeText(instance.port)}.`);
   }

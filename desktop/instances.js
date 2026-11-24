@@ -41,11 +41,12 @@ function serverProcess({ folder, port, token }) {
   });
 }
 
-function tunnelProcess(binary, args) {
+function tunnelProcess(binary, args, connectorToken) {
   const env = { ...process.env };
   for (const key of Object.keys(env)) {
     if (['TUNNEL_TOKEN', 'TUNNEL_TOKEN_FILE', 'BRIDGE_TOKEN', 'BRIDGE_AUTH_TOKEN'].includes(key.toUpperCase())) delete env[key];
   }
+  if (connectorToken) env.TUNNEL_TOKEN = connectorToken;
   return spawn(binary, args, { cwd: repo, env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
 }
 
@@ -77,19 +78,22 @@ class InstanceManager {
   }
 
   list() {
-    return [...this.instances.values()].map(({ id, folder, port, status, publicUrl, error, logs, approvals, approvalMode, profileName }) => ({
-      id, folder, port, status, publicUrl, error, approvalMode, profileName, logs: [...logs], approvals: [...approvals.values()]
+    return [...this.instances.values()].map(({ id, folder, port, status, publicUrl, error, logs, approvals, approvalMode, profileName, tunnelMode }) => ({
+      id, folder, port, status, publicUrl, error, approvalMode, profileName, tunnelMode, logs: [...logs], approvals: [...approvals.values()]
     }));
   }
 
   emit() { this.onChange(this.list()); }
 
   redact(instance, value) {
-    return String(value ?? '').replaceAll(instance.token, '[REDACTED]')
-      .replace(/([?&](?:token|apiKey|auth)=)[^&\s]+/gi, '$1[REDACTED]');
+    let text = String(value ?? '');
+    for (const secret of [instance.token, instance.connectorToken]) {
+      if (secret) text = text.replaceAll(secret, '[REDACTED]');
+    }
+    return text.replace(/([?&](?:token|apiKey|auth)=)[^&\s]+/gi, '$1[REDACTED]');
   }
 
-  start({ folder, port, profileName } = {}) {
+  start({ folder, port, profileName, namedTunnel } = {}) {
     if (this.closing) throw new Error('Bridge Desktop is shutting down.');
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Enter a port from 1 to 65535.');
     if ([...this.instances.values()].some(item => item.port === port && activeStatuses.has(item.status))) {
@@ -102,9 +106,14 @@ class InstanceManager {
     } catch {
       throw new Error('Choose an existing project folder.');
     }
+    if (namedTunnel && [...this.instances.values()].some(item => activeStatuses.has(item.status) &&
+      (item.connectorToken === namedTunnel.connectorToken || item.namedOrigin === namedTunnel.publicUrl))) {
+      throw new Error('This named tunnel or hostname is already in use by a Bridge Desktop instance.');
+    }
     const binary = this.resolveTunnel();
     const instance = {
-      id: randomUUID(), token: randomBytes(24).toString('hex'), folder, port, profileName,
+      id: randomUUID(), token: namedTunnel?.mcpToken ?? randomBytes(24).toString('hex'), folder, port, profileName,
+      tunnelMode: namedTunnel ? 'named' : 'quick', namedOrigin: namedTunnel?.publicUrl, connectorToken: namedTunnel?.connectorToken,
       status: 'starting-server', publicUrl: null, error: null, logs: [], approvals: new Map(), approvalMode: 'review'
     };
     for (const [id, item] of this.instances) {
@@ -154,17 +163,23 @@ class InstanceManager {
       instance.status = 'starting-tunnel';
       this.emit();
       try {
-        const args = ['tunnel', '--no-autoupdate', '--url', `http://127.0.0.1:${instance.port}`];
-        instance.tunnel = trackChild(this.startTunnel(binary, args));
+        const named = instance.tunnelMode === 'named';
+        const args = ['tunnel', '--no-autoupdate', ...(named ? ['run'] : ['--url', `http://127.0.0.1:${instance.port}`])];
+        instance.tunnel = trackChild(this.startTunnel(binary, args, instance.connectorToken));
         this.observe(instance, instance.tunnel, 'Tunnel', line => {
-          const url = line.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com\b/i)?.[0];
-          if (instance.status !== 'starting-tunnel' || !url || !tunnelUrlPattern.test(url)) return;
+          if (instance.status !== 'starting-tunnel') return;
+          const url = named
+            ? (/\bRegistered tunnel connection\b/.test(line) ? instance.namedOrigin : null)
+            : line.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com\b/i)?.[0];
+          if (!url || (!named && !tunnelUrlPattern.test(url))) return;
           clearTimeout(instance.timer);
           instance.publicUrl = url;
           instance.status = 'online';
           this.emit();
         });
-        instance.timer = setTimeout(() => this.fail(instance, 'Cloudflare did not return a quick tunnel URL in time.'), 45000);
+        instance.timer = setTimeout(() => this.fail(instance, named
+          ? 'The named tunnel connector did not register in time.'
+          : 'Cloudflare did not return a quick tunnel URL in time.'), 45000);
       } catch (error) {
         this.fail(instance, error.message);
       }
@@ -263,6 +278,8 @@ class InstanceManager {
     instance.publicUrl = null;
     instance.approvals.clear();
     instance.stopping = Promise.all([stopChild(instance.tunnel, false), stopChild(instance.server, true)]).then(() => {
+      instance.token = null;
+      instance.connectorToken = null;
       instance.status = finalStatus;
       this.emit();
     });
