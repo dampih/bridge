@@ -271,7 +271,7 @@ if (typeof process.on === 'function') {
   process.on('message', (msg) => {
     if (msg && msg.type === 'shutdown') { stopAllJobs(); process.exit(0); }
     if (msg && msg.type === 'set-approval-mode') {
-      if (setApprovalMode(msg.mode)) { try { process.send({ type: 'approval-mode', mode: approvalMode }); } catch (e) {} }
+      if (setApprovalMode(msg.mode)) { try { process.send({ type: 'approval-mode', mode: approvalMode, requestId: msg.requestId }); } catch (e) {} }
       return;
     }
     if (!msg || msg.type !== 'approval-response') return;

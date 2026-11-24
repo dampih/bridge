@@ -97,6 +97,17 @@
         <button class="button button-stop stop-instance" type="button" hidden>Stop tunnel</button>
       </div>
       <p class="feedback instance-feedback" hidden></p>
+      <div class="instance-mode" hidden>
+        <label class="field-label">Approval mode
+          <select class="mode-select">
+            <option value="review">Review</option>
+            <option value="default">Default</option>
+            <option value="auto">Auto</option>
+            <option value="turbo">Turbo</option>
+          </select>
+        </label>
+        <p class="field-help mode-help"></p>
+      </div>
       <section class="approval-section" hidden>
         <h4>Approval requests</h4>
         <div class="approval-list"></div>

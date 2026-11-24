@@ -152,7 +152,9 @@ npm --prefix desktop start
 
 Choose a project folder and a free port (for example, `3101`), then click **Start public tunnel**. Repeat with another folder and port (for example, `3102`). When an instance is online, copy its authenticated MCP URL and paste it into the corresponding AI connector. Keep the URL private: it includes that instance’s access token. Each start creates a new temporary URL. Desktop does not use saved named tunnels.
 
-Desktop uses **Review** mode: changes that require approval appear on the corresponding project card. Only start a public tunnel for a workspace you intend to share with a trusted AI connector. Click **Stop** to close one instance, or close the window to stop all desktop-managed instances.
+Every desktop instance starts in **Review**. Use the **Approval mode** dropdown on an online instance to switch between Review, Default, Auto, and Turbo without restarting or affecting other instances. **Turbo** requires confirmation because it stops asking for approval on new actions; pending requests still need a decision. Mode changes are not saved for future launches.
+
+Only start a public tunnel for a workspace you intend to share with a trusted AI connector. Click **Stop** to close one instance, or close the window to stop all desktop-managed instances.
 
 ---
 

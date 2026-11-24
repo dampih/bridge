@@ -10,6 +10,7 @@ const readline = require('node:readline');
 const repo = path.join(__dirname, '..');
 const serverScript = path.join(repo, 'secure-folder-mcp', 'server.js');
 const activeStatuses = new Set(['starting-server', 'starting-tunnel', 'online', 'stopping']);
+const approvalModes = new Set(['review', 'default', 'auto', 'turbo']);
 const tunnelUrlPattern = /^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/i;
 
 function findCloudflared() {
@@ -75,8 +76,8 @@ class InstanceManager {
   }
 
   list() {
-    return [...this.instances.values()].map(({ id, folder, port, status, publicUrl, error, logs, approvals }) => ({
-      id, folder, port, status, publicUrl, error, logs: [...logs], approvals: [...approvals.values()]
+    return [...this.instances.values()].map(({ id, folder, port, status, publicUrl, error, logs, approvals, approvalMode }) => ({
+      id, folder, port, status, publicUrl, error, approvalMode, logs: [...logs], approvals: [...approvals.values()]
     }));
   }
 
@@ -103,7 +104,7 @@ class InstanceManager {
     const binary = this.resolveTunnel();
     const instance = {
       id: randomUUID(), token: randomBytes(24).toString('hex'), folder, port,
-      status: 'starting-server', publicUrl: null, error: null, logs: [], approvals: new Map()
+      status: 'starting-server', publicUrl: null, error: null, logs: [], approvals: new Map(), approvalMode: 'review'
     };
     for (const [id, item] of this.instances) {
       if (this.instances.size < 25) break;
@@ -166,6 +167,12 @@ class InstanceManager {
       } catch (error) {
         this.fail(instance, error.message);
       }
+    } else if (message.type === 'approval-mode') {
+      const pending = instance.modeChange;
+      if (!pending || message.requestId !== pending.id || message.mode !== pending.mode) return;
+      instance.approvalMode = message.mode;
+      pending.finish();
+      this.emit();
     } else if (message.type === 'approval-request') {
       const { id, action, detail, reason } = message;
       instance.approvals.set(id, {
@@ -179,6 +186,40 @@ class InstanceManager {
       instance.folder = this.redact(instance, message.path);
       this.emit();
     }
+  }
+
+  setApprovalMode({ instanceId, mode } = {}) {
+    const instance = this.instances.get(instanceId);
+    const child = instance?.server?.child;
+    if (!approvalModes.has(mode)) throw new Error('Invalid approval mode.');
+    if (instance?.status !== 'online' || !child?.connected) throw new Error('This instance is not online.');
+    if (instance.modeChange) throw new Error('An approval mode change is already pending.');
+    if (instance.approvalMode === mode) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const id = randomUUID();
+      const finish = error => {
+        if (instance.modeChange?.id !== id) return;
+        clearTimeout(timer);
+        instance.modeChange = null;
+        if (error) reject(new Error(error));
+        else resolve();
+      };
+      const failChange = () => {
+        if (instance.modeChange?.id !== id) return;
+        const error = 'The MCP server did not confirm the approval mode. This instance will stop for safety.';
+        finish(error);
+        this.fail(instance, error);
+      };
+      const timer = setTimeout(failChange, 3000);
+      instance.modeChange = { id, mode, finish };
+      try {
+        child.send({ type: 'set-approval-mode', mode, requestId: id }, error => {
+          if (error) failChange();
+        });
+      } catch {
+        failChange();
+      }
+    });
   }
 
   answerApproval({ instanceId, requestId, approved } = {}) {
@@ -214,6 +255,7 @@ class InstanceManager {
     if (!instance || !activeStatuses.has(instance.status)) return Promise.resolve();
     if (instance.stopping) return instance.stopping;
     clearTimeout(instance.timer);
+    instance.modeChange?.finish('This instance stopped before confirming the approval mode.');
     instance.status = 'stopping';
     instance.publicUrl = null;
     instance.approvals.clear();

@@ -23,6 +23,12 @@ const statuses = new Map([
   ['stopped', 'Stopped'],
   ['failed', 'Failed'],
 ]);
+const modeHelp = {
+  review: 'Asks before changes, shell commands, and folder switches.',
+  default: 'Asks before deletes, destructive Git operations, sensitive file access, and folder switches.',
+  auto: 'Allows recoverable actions such as moving files to the Bridge trash; asks before higher-risk actions.',
+  turbo: 'Does not ask for approval on new actions. Server restrictions still apply.'
+};
 const stoppable = new Set(['starting-server', 'starting-tunnel', 'online']);
 const defaultPort = 3101;
 const maxPort = 65535;
@@ -273,6 +279,10 @@ function makeCard(instance) {
     copy: $('.copy-url', root),
     stop: $('.stop-instance', root),
     feedback: $('.instance-feedback', root),
+    modeRow: $('.instance-mode', root),
+    modeSelect: $('.mode-select', root),
+    modeHelp: $('.mode-help', root),
+    changingMode: false,
     approvalSection: $('.approval-section', root),
     approvalList: $('.approval-list', root),
     logCount: $('.log-count', root),
@@ -287,6 +297,9 @@ function makeCard(instance) {
   root.setAttribute('aria-labelledby', card.name.id);
   root.setAttribute('aria-describedby', `${card.error.id} instance-status-${number}`);
   card.status.id = `instance-status-${number}`;
+  card.modeHelp.id = `mode-help-${number}`;
+  card.modeSelect.setAttribute('aria-describedby', card.modeHelp.id);
+  card.modeSelect.addEventListener('change', () => setApprovalMode(card));
   card.copy.addEventListener('click', () => copyUrl(card));
   card.stop.addEventListener('click', () => stopInstance(card));
   return card;
@@ -311,8 +324,30 @@ function renderCard(card) {
   unavailable(card.stop, state === 'stopping');
   text(card.copy, card.copying ? 'Copying…' : 'Copy MCP URL');
   text(card.stop, state === 'stopping' ? 'Stopping…' : 'Stop tunnel');
+  card.modeRow.hidden = state !== 'online';
+  card.modeSelect.disabled = card.changingMode;
+  card.modeSelect.value = instance.approvalMode;
+  text(card.modeHelp, card.changingMode ? 'Waiting for confirmation…' : modeHelp[instance.approvalMode] || '');
   renderApprovals(card, instance.approvals);
   renderLogs(card, instance.logs);
+}
+
+async function setApprovalMode(card) {
+  if (card.changingMode || card.stopping || card.instance.status !== 'online') return;
+  const mode = card.modeSelect.value;
+  if (mode === card.instance.approvalMode) return;
+  card.changingMode = true;
+  message(card.feedback, '');
+  renderCard(card);
+  try {
+    await bridge.setApprovalMode({ instanceId: card.instance.id, mode });
+  } catch (error) {
+    message(card.feedback, errorMessage(error, 'Could not change approval mode.'));
+    announce(card.feedback.textContent);
+  } finally {
+    card.changingMode = false;
+    renderCard(card);
+  }
 }
 
 async function copyUrl(card) {

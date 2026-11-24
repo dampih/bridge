@@ -16,7 +16,7 @@
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 body { margin: 0; min-width: 0; background: var(--bg); color: var(--text); }
-button, input { font: inherit; }
+button, input, select { font: inherit; }
 p, h1, h2, h3, h4, dl, dd { margin: 0; }
 :focus-visible { outline: 2px solid var(--volt); outline-offset: 4px; }
 .frame { width: min(calc(100% - 64px), 1160px); margin-inline: auto; }
@@ -51,7 +51,7 @@ h1 { font-size: clamp(2rem, 5.4vw, 3.7rem); line-height: 1.08; letter-spacing: -
 #launch-form { display: grid; gap: 18px; margin-top: 22px; }
 .field { display: grid; gap: 8px; }
 .field-label { font-weight: 650; font-size: .9rem; }
-.folder-path, input { border: 1px solid #475875; background: var(--bg); border-radius: 8px; padding: 10px 12px; color: var(--text); }
+.folder-path, input, .mode-select { border: 1px solid #475875; background: var(--bg); border-radius: 8px; padding: 10px 12px; color: var(--text); }
 .folder-path { color: var(--muted); font: .82rem/1.5 var(--mono); overflow-wrap: anywhere; max-height: 8rem; overflow: auto; }
 .port-controls { display: flex; flex-wrap: wrap; gap: 8px; }
 #port { flex: 1 1 78px; min-width: 0; width: 100%; font-family: var(--mono); }
@@ -96,6 +96,10 @@ h1 { font-size: clamp(2rem, 5.4vw, 3.7rem); line-height: 1.08; letter-spacing: -
 .feedback { color: var(--danger); font-size: .88rem; overflow-wrap: anywhere; }
 .feedback.is-success { color: #e0ff91; }
 .sync-feedback { padding: 14px; margin-bottom: 12px; }
+.instance-mode { margin-top: 16px; }
+.instance-mode label { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.mode-select { padding-block: 6px; }
+.mode-help { margin-top: 6px; }
 .approval-section { margin-top: 16px; padding: 13px; border-radius: 8px; border: 1px solid #7d6436; background: #28231f; }
 .approval-section h4 { color: #ffe0a0; font-size: .94rem; }
 .approval-request { margin-top: 9px; border-top: 1px solid #6a5738; padding-top: 9px; overflow-wrap: anywhere; }

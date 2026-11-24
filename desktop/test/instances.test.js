@@ -34,6 +34,24 @@ function close(server) {
 
 function localUrl(port, route) { return `http://127.0.0.1:${port}${route}`; }
 
+test('an unconfirmed mode change stops only the affected instance', async () => {
+  const manager = new InstanceManager();
+  const instance = {
+    id: 'a', token: 'test-secret', status: 'online', approvalMode: 'review', logs: [], approvals: new Map(),
+    server: {
+      child: { connected: true, send(_message, callback) { callback(new Error('IPC closed')); } },
+      closed: Promise.resolve()
+    }
+  };
+  manager.instances.set(instance.id, instance);
+  manager.instances.set('b', { id: 'b', status: 'online', logs: [], approvals: new Map(), approvalMode: 'review' });
+  await assert.rejects(manager.setApprovalMode({ instanceId: 'a', mode: 'turbo' }), /did not confirm/);
+  await instance.stopping;
+  assert.equal(instance.status, 'failed');
+  assert.equal(instance.approvalMode, 'review');
+  assert.equal(manager.instances.get('b').status, 'online');
+});
+
 test('desktop manages two isolated MCP servers, approvals, conflicts and shutdown', { timeout: 20000 }, async t => {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), 'bridge-desktop-'));
   const folders = await Promise.all(['project-a', 'project-b'].map(async name => {
@@ -80,6 +98,9 @@ test('desktop manages two isolated MCP servers, approvals, conflicts and shutdow
   const b = manager.start({ folder: folders[1], port: portB });
   const busy = manager.start({ folder: folders[0], port: busyPort });
   await Promise.all([online(a), online(b), waitFor(() => get(busy).status === 'failed')]);
+  assert.equal(get(a).approvalMode, 'review');
+  assert.equal(get(b).approvalMode, 'review');
+  assert.throws(() => manager.setApprovalMode({ instanceId: a, mode: 'invalid' }), /Invalid approval mode/);
   assert.match(get(busy).error, /already in use/);
   assert.ok(reservations[2].listening);
   assert.deepEqual(tunnels.map(({ args }) => args.at(-1)).sort(), [localUrl(portA, ''), localUrl(portB, '')].sort());
@@ -96,10 +117,10 @@ test('desktop manages two isolated MCP servers, approvals, conflicts and shutdow
   assert.equal((await status(portB, tokenA)).status, 401);
   assert.equal((await status(portB, tokenB)).status, 200);
 
-  function write(port, token, id) {
+  function write(port, token, id, file = 'hello.txt') {
     return fetch(localUrl(port, '/mcp'), {
       method: 'POST', headers: { ...auth(token), 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(8000),
-      body: JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'write_file', arguments: { path: 'hello.txt', content: 'Hello' } } })
+      body: JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'write_file', arguments: { path: file, content: 'Hello' } } })
     }).then(response => response.json());
   }
   const writeResults = Promise.all([write(portA, tokenA, 1), write(portB, tokenB, 2)]);
@@ -107,11 +128,31 @@ test('desktop manages two isolated MCP servers, approvals, conflicts and shutdow
   writeResults.catch(() => {});
   const [approvalA, approvalB] = await Promise.all([a, b].map(id => waitFor(() => get(id).approvals[0])));
   assert.equal(approvalA.id, approvalB.id, 'Approval IDs are scoped to each server');
+  await manager.setApprovalMode({ instanceId: a, mode: 'default' });
+  assert.equal(get(a).approvalMode, 'default');
+  assert.equal(get(b).approvalMode, 'review');
+  assert.equal(get(a).approvals[0].id, approvalA.id);
+  assert.equal(get(b).approvals[0].id, approvalB.id);
+  await assert.rejects(fs.access(path.join(folders[0], 'hello.txt')), { code: 'ENOENT' });
+  await write(portA, tokenA, 3, 'default.txt');
+  assert.equal(await fs.readFile(path.join(folders[0], 'default.txt'), 'utf8'), 'Hello');
   await manager.answerApproval({ instanceId: a, requestId: approvalA.id, approved: true });
   await manager.answerApproval({ instanceId: b, requestId: approvalB.id, approved: false });
   await writeResults;
   assert.equal(await fs.readFile(path.join(folders[0], 'hello.txt'), 'utf8'), 'Hello');
   await assert.rejects(fs.access(path.join(folders[1], 'hello.txt')), { code: 'ENOENT' });
+
+  async function expectReview(id, port, token, rpcId) {
+    const pending = write(port, token, rpcId, 'review.txt');
+    pending.catch(() => {});
+    const approval = await waitFor(() => get(id).approvals[0]);
+    await manager.answerApproval({ instanceId: id, requestId: approval.id, approved: false });
+    await pending;
+  }
+  await expectReview(b, portB, tokenB, 4);
+  await manager.setApprovalMode({ instanceId: a, mode: 'review' });
+  assert.equal(get(a).approvalMode, 'review');
+  await expectReview(a, portA, tokenA, 5);
 
   await fetch(localUrl(portA, `/api/status?token=${tokenA}`), { signal: AbortSignal.timeout(3000) });
   assert.ok(!JSON.stringify(manager.list()).includes(tokenA));

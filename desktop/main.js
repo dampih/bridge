@@ -42,6 +42,19 @@ app.whenReady().then(() => {
   handle('stop', id => manager.stop(id));
   handle('copy-url', id => { clipboard.writeText(manager.urlForCopy(id)); });
   handle('answer-approval', data => manager.answerApproval(data));
+  handle('set-approval-mode', async data => {
+    const instance = manager.list().find(item => item.id === data?.instanceId && item.status === 'online');
+    if (data?.mode === 'turbo' && instance && instance.approvalMode !== 'turbo') {
+      const result = await dialog.showMessageBox(window, {
+        type: 'warning', title: 'Enable Turbo mode?',
+        message: `Enable Turbo mode for the instance on port ${instance.port}?`,
+        detail: 'New actions will no longer ask for approval. Existing requests still need a decision.',
+        buttons: ['Cancel', 'Enable Turbo'], cancelId: 0, defaultId: 0
+      });
+      if (result.response !== 1) return;
+    }
+    await manager.setApprovalMode(data);
+  });
 
   window = new BrowserWindow({
     title: 'Bridge Desktop', width: 1080, height: 790, minWidth: 640, minHeight: 520,
