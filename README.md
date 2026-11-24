@@ -139,6 +139,23 @@ If a named tunnel is configured, it uses the saved Cloudflare ingress at `localh
 
 ---
 
+## Bridge Desktop (Windows)
+
+Use the desktop dashboard to manage several projects from one window. It runs from this checkout, separately from the npm CLI. You need **Node.js 22.12 or later** and [Cloudflare `cloudflared`](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/). The app looks for `cloudflared.exe` in the repo root, on `PATH`, or in `~/.bridge/bin` (where the CLI caches it).
+
+From the repo root:
+
+```powershell
+npm --prefix desktop ci
+npm --prefix desktop start
+```
+
+Choose a project folder and a free port (for example, `3101`), then click **Start public tunnel**. Repeat with another folder and port (for example, `3102`). When an instance is online, copy its authenticated MCP URL and paste it into the corresponding AI connector. Keep the URL private: it includes that instance’s access token. Each start creates a new temporary URL. Desktop does not use saved named tunnels.
+
+Desktop uses **Review** mode: changes that require approval appear on the corresponding project card. Only start a public tunnel for a workspace you intend to share with a trusted AI connector. Click **Stop** to close one instance, or close the window to stop all desktop-managed instances.
+
+---
+
 ## Universal MCP Connection
 
 Bridge automatically creates an Anycast HTTPS tunnel, attaches your auth token, and copies the authenticated endpoint to your clipboard:

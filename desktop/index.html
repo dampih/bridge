@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bridge Desktop</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="renderer.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to dashboard</a>
+  <header class="masthead">
+    <div class="frame masthead-inner">
+      <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>Bridge</span></div>
+      <span class="app-label">Desktop</span>
+    </div>
+  </header>
+
+  <main id="main" class="frame" tabindex="-1">
+    <section class="hero" aria-labelledby="dashboard-title">
+      <div class="hero-content">
+        <p class="eyebrow">Workspace control</p>
+        <h1 id="dashboard-title">Tunnel dashboard</h1>
+        <p class="hero-description">Connect a local project to an MCP client. Manage each public tunnel and review its approval requests here.</p>
+      </div>
+      <div class="hero-diagram" aria-hidden="true">
+        <span class="diagram-node"><span class="diagram-folder"></span><span>Local folder</span></span>
+        <span class="diagram-line"></span>
+        <span class="diagram-node"><span class="diagram-link"></span><span>MCP client</span></span>
+      </div>
+    </section>
+
+    <div class="dashboard">
+      <section class="setup panel" aria-labelledby="setup-title">
+        <div class="section-heading setup-heading">
+          <p class="eyebrow">Setup</p>
+          <h2 id="setup-title">New tunnel</h2>
+          <p>Pick a workspace and assign it a local port.</p>
+        </div>
+        <form id="launch-form">
+          <div class="field">
+            <p class="field-label" id="folder-label">Workspace folder</p>
+            <p class="folder-path" id="selected-folder">No folder selected</p>
+            <button class="button button-secondary" id="pick-folder" type="button" aria-describedby="folder-label selected-folder" aria-disabled="true">Choose folder</button>
+          </div>
+          <div class="field">
+            <label class="field-label" for="port">Local port</label>
+            <div class="port-controls">
+              <input id="port" name="port" type="number" min="1" max="65535" step="1" inputmode="numeric" value="3101" required aria-describedby="port-help">
+              <button class="button button-secondary" id="next-port" type="button">Next port</button>
+            </div>
+            <p class="field-help" id="port-help">Use a different port for each running tunnel.</p>
+          </div>
+          <div class="public-notice" id="public-notice">
+            <strong>Public access</strong>
+            <p>Starting a tunnel gives this workspace a public endpoint. Treat the copied MCP URL like a password.</p>
+          </div>
+          <button class="button button-primary" id="start-tunnel" type="submit" aria-describedby="public-notice" aria-disabled="true">Start public tunnel</button>
+          <p class="feedback" id="launch-feedback" role="alert" hidden></p>
+        </form>
+      </section>
+
+      <section class="instances" aria-labelledby="instances-title">
+        <div class="section-heading instances-heading">
+          <div>
+            <p class="eyebrow">Monitor</p>
+            <h2 id="instances-title">Tunnel instances</h2>
+          </div>
+          <p class="instance-count" id="instance-count" hidden></p>
+        </div>
+        <p class="feedback panel sync-feedback" id="sync-feedback" role="alert" hidden></p>
+        <div class="panel empty-state" id="empty-state">
+          <span class="empty-mark" aria-hidden="true">&gt;_</span>
+          <p id="empty-title">Loading tunnel instances…</p>
+          <p id="empty-description" hidden>After you start a tunnel, its status, approvals, and recent logs will appear here.</p>
+        </div>
+        <div class="instance-list" id="instance-list"></div>
+      </section>
+    </div>
+    <div class="sr-only" id="announcement" role="status" aria-atomic="true"></div>
+  </main>
+
+  <template id="instance-template">
+    <article class="panel instance-card" tabindex="-1">
+      <div class="instance-top">
+        <div class="instance-identity">
+          <h3 class="instance-name"></h3>
+          <p class="instance-folder"></p>
+        </div>
+        <span class="status-badge"></span>
+      </div>
+      <dl class="instance-meta"><div><dt>Local port</dt><dd class="instance-port"></dd></div></dl>
+      <p class="feedback instance-error" hidden></p>
+      <div class="instance-actions">
+        <button class="button button-secondary copy-url" type="button" hidden>Copy MCP URL</button>
+        <button class="button button-stop stop-instance" type="button" hidden>Stop tunnel</button>
+      </div>
+      <p class="feedback instance-feedback" hidden></p>
+      <section class="approval-section" hidden>
+        <h4>Approval requests</h4>
+        <div class="approval-list"></div>
+      </section>
+      <details class="logs">
+        <summary>Recent logs <span class="log-count"></span></summary>
+        <pre class="log-output" tabindex="0" aria-label="Recent instance log output"></pre>
+      </details>
+    </article>
+  </template>
+
+  <template id="approval-template">
+    <div class="approval-request">
+      <p class="approval-action"></p>
+      <p class="approval-detail" hidden></p>
+      <p class="approval-reason" hidden></p>
+      <div class="approval-actions">
+        <button class="button button-secondary deny-request" type="button">Deny</button>
+        <button class="button button-approve approve-request" type="button">Approve</button>
+      </div>
+      <p class="feedback approval-feedback" hidden></p>
+    </div>
+  </template>
+</body>
+</html>

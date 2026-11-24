@@ -380,7 +380,8 @@ const MAX_BODY_BYTES = 20 * 1024 * 1024;
 const MAX_LOG_BYTES = 10 * 1024 * 1024;
 let logWritesSinceCheck = 0;
 function appendRequestLog(line) {
-  const safe = line.replace(/([?&](token|apiKey|auth)=)[^&\s]+/gi, '$1[REDACTED]');
+  let safe = line.replace(/([?&](token|apiKey|auth)=)[^&\s]+/gi, '$1[REDACTED]');
+  if (authToken) safe = safe.replaceAll(authToken, '[REDACTED]');
   try {
     // Rotate: keep one previous file so the log never fills the disk.
     if (++logWritesSinceCheck >= 200) {
@@ -2537,6 +2538,7 @@ function startHttpServer(port) {
   const listenHost = process.env.BRIDGE_HOST || '127.0.0.1';
   server.listen(port, listenHost, () => {
     logInfo(`Bridge MCP listening on ${listenHost}:${port}`);
+    if (process.connected) process.send({ type: 'http-ready', port }, () => {});
   });
 }
 
