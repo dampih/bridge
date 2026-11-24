@@ -67,17 +67,18 @@ async function stopChild(tracked, graceful) {
 }
 
 class InstanceManager {
-  constructor({ onChange = () => {}, resolveTunnel = findCloudflared, startTunnel = tunnelProcess } = {}) {
+  constructor({ onChange = () => {}, onApproval = () => {}, resolveTunnel = findCloudflared, startTunnel = tunnelProcess } = {}) {
     this.instances = new Map();
     this.onChange = onChange;
+    this.onApproval = onApproval;
     this.resolveTunnel = resolveTunnel;
     this.startTunnel = startTunnel;
     this.closing = false;
   }
 
   list() {
-    return [...this.instances.values()].map(({ id, folder, port, status, publicUrl, error, logs, approvals, approvalMode }) => ({
-      id, folder, port, status, publicUrl, error, approvalMode, logs: [...logs], approvals: [...approvals.values()]
+    return [...this.instances.values()].map(({ id, folder, port, status, publicUrl, error, logs, approvals, approvalMode, profileName }) => ({
+      id, folder, port, status, publicUrl, error, approvalMode, profileName, logs: [...logs], approvals: [...approvals.values()]
     }));
   }
 
@@ -88,7 +89,7 @@ class InstanceManager {
       .replace(/([?&](?:token|apiKey|auth)=)[^&\s]+/gi, '$1[REDACTED]');
   }
 
-  start({ folder, port } = {}) {
+  start({ folder, port, profileName } = {}) {
     if (this.closing) throw new Error('Bridge Desktop is shutting down.');
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Enter a port from 1 to 65535.');
     if ([...this.instances.values()].some(item => item.port === port && activeStatuses.has(item.status))) {
@@ -103,7 +104,7 @@ class InstanceManager {
     }
     const binary = this.resolveTunnel();
     const instance = {
-      id: randomUUID(), token: randomBytes(24).toString('hex'), folder, port,
+      id: randomUUID(), token: randomBytes(24).toString('hex'), folder, port, profileName,
       status: 'starting-server', publicUrl: null, error: null, logs: [], approvals: new Map(), approvalMode: 'review'
     };
     for (const [id, item] of this.instances) {
@@ -175,10 +176,12 @@ class InstanceManager {
       this.emit();
     } else if (message.type === 'approval-request') {
       const { id, action, detail, reason } = message;
+      if (instance.approvals.has(id)) return;
       instance.approvals.set(id, {
         id, action: this.redact(instance, action), detail: this.redact(instance, detail), reason: this.redact(instance, reason)
       });
       this.emit();
+      this.onApproval({ instanceId: instance.id, requestId: id, port: instance.port });
     } else if (message.type === 'approval-cancel') {
       instance.approvals.delete(message.id);
       this.emit();

@@ -32,34 +32,70 @@
     </section>
 
     <div class="dashboard">
-      <section class="setup panel" aria-labelledby="setup-title">
-        <div class="section-heading setup-heading">
-          <p class="eyebrow">Setup</p>
-          <h2 id="setup-title">New tunnel</h2>
-          <p>Pick a workspace and assign it a local port.</p>
-        </div>
-        <form id="launch-form">
-          <div class="field">
-            <p class="field-label" id="folder-label">Workspace folder</p>
-            <p class="folder-path" id="selected-folder">No folder selected</p>
-            <button class="button button-secondary" id="pick-folder" type="button" aria-describedby="folder-label selected-folder" aria-disabled="true">Choose folder</button>
+      <div class="setup-column">
+        <section class="profiles panel" aria-labelledby="profiles-title">
+          <div class="section-heading setup-heading">
+            <p class="eyebrow">Projects</p>
+            <h2 id="profiles-title">Saved project profiles</h2>
+            <p>Save a workspace and port for later. Saving a profile does not start a tunnel.</p>
           </div>
-          <div class="field">
-            <label class="field-label" for="port">Local port</label>
-            <div class="port-controls">
-              <input id="port" name="port" type="number" min="1" max="65535" step="1" inputmode="numeric" value="3101" required aria-describedby="port-help">
-              <button class="button button-secondary" id="next-port" type="button">Next port</button>
+          <p class="public-notice" id="profile-public-notice">Starting a public tunnel gives the saved workspace a public endpoint. Treat the copied MCP URL like a password.</p>
+          <p class="feedback" id="profiles-feedback" role="alert" hidden></p>
+          <button class="button button-secondary" id="new-profile" type="button" aria-controls="profile-form" aria-expanded="false" aria-disabled="true">New profile</button>
+          <form id="profile-form" aria-labelledby="profile-form-title" hidden>
+            <h3 id="profile-form-title">New profile</h3>
+            <div class="field">
+              <label class="field-label" for="profile-name">Profile name</label>
+              <input id="profile-name" name="name" type="text" maxlength="60" required>
             </div>
-            <p class="field-help" id="port-help">Use a different port for each running tunnel.</p>
+            <div class="field">
+              <p class="field-label" id="profile-folder-label">Workspace folder</p>
+              <p class="folder-path" id="profile-folder">No folder selected</p>
+              <button class="button button-secondary" id="pick-profile-folder" type="button" aria-describedby="profile-folder-label profile-folder">Choose folder</button>
+            </div>
+            <div class="field">
+              <label class="field-label" for="profile-port">Local port</label>
+              <input id="profile-port" name="port" type="number" min="1" max="65535" step="1" inputmode="numeric" value="3101" required>
+            </div>
+            <div class="profile-actions">
+              <button class="button button-primary" id="save-profile" type="submit" aria-disabled="true">Save profile</button>
+              <button class="button button-secondary" id="cancel-profile" type="button">Cancel</button>
+            </div>
+            <p class="feedback" id="profile-form-feedback" role="alert" hidden></p>
+          </form>
+          <p class="field-help" id="profiles-empty">Loading saved profiles…</p>
+          <ul class="profile-list" id="profile-list" aria-label="Saved profiles" hidden></ul>
+        </section>
+
+        <section class="setup panel" aria-labelledby="setup-title">
+          <div class="section-heading setup-heading">
+            <p class="eyebrow">Setup</p>
+            <h2 id="setup-title">New tunnel</h2>
+            <p>Pick a workspace and assign it a local port.</p>
           </div>
-          <div class="public-notice" id="public-notice">
-            <strong>Public access</strong>
-            <p>Starting a tunnel gives this workspace a public endpoint. Treat the copied MCP URL like a password.</p>
-          </div>
-          <button class="button button-primary" id="start-tunnel" type="submit" aria-describedby="public-notice" aria-disabled="true">Start public tunnel</button>
-          <p class="feedback" id="launch-feedback" role="alert" hidden></p>
-        </form>
-      </section>
+          <form id="launch-form">
+            <div class="field">
+              <p class="field-label" id="folder-label">Workspace folder</p>
+              <p class="folder-path" id="selected-folder">No folder selected</p>
+              <button class="button button-secondary" id="pick-folder" type="button" aria-describedby="folder-label selected-folder" aria-disabled="true">Choose folder</button>
+            </div>
+            <div class="field">
+              <label class="field-label" for="port">Local port</label>
+              <div class="port-controls">
+                <input id="port" name="port" type="number" min="1" max="65535" step="1" inputmode="numeric" value="3101" required aria-describedby="port-help">
+                <button class="button button-secondary" id="next-port" type="button">Next port</button>
+              </div>
+              <p class="field-help" id="port-help">Use a different port for each running tunnel.</p>
+            </div>
+            <div class="public-notice" id="public-notice">
+              <strong>Public access</strong>
+              <p>Starting a tunnel gives this workspace a public endpoint. Treat the copied MCP URL like a password.</p>
+            </div>
+            <button class="button button-primary" id="start-tunnel" type="submit" aria-describedby="public-notice" aria-disabled="true">Start public tunnel</button>
+            <p class="feedback" id="launch-feedback" role="alert" hidden></p>
+          </form>
+        </section>
+      </div>
 
       <section class="instances" aria-labelledby="instances-title">
         <div class="section-heading instances-heading">
@@ -80,6 +116,20 @@
     </div>
     <div class="sr-only" id="announcement" role="status" aria-atomic="true"></div>
   </main>
+
+  <template id="profile-template">
+    <li class="profile-card">
+      <h3 class="profile-name"></h3>
+      <p class="profile-location"></p>
+      <p class="field-help">Local port: <span class="profile-port"></span></p>
+      <div class="profile-actions">
+        <button class="button button-primary start-profile" type="button" aria-describedby="profile-public-notice">Start public tunnel</button>
+        <button class="button button-secondary edit-profile" type="button">Edit</button>
+        <button class="button button-stop delete-profile" type="button">Delete</button>
+      </div>
+      <p class="feedback profile-feedback" role="alert" hidden></p>
+    </li>
+  </template>
 
   <template id="instance-template">
     <article class="panel instance-card" tabindex="-1">

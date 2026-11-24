@@ -2,8 +2,10 @@
 
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { app, BrowserWindow, clipboard, dialog, ipcMain } = require('electron');
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Notification } = require('electron');
 const { InstanceManager } = require('./instances');
+const { ProfileStore } = require('./profiles');
+const { createApprovalNotifier } = require('./notifications');
 
 const page = path.join(__dirname, 'index.html');
 const pageUrl = pathToFileURL(page).href;
@@ -13,7 +15,18 @@ const selectedFolders = new Set();
 const manager = new InstanceManager({
   onChange(instances) {
     if (window && !window.isDestroyed()) window.webContents.send('bridge:change', instances);
+    notifier.update();
+  },
+  onApproval(target) {
+    // A desktop notification is optional; the pending request stays in the dashboard.
+    try { notifier.notify(target); } catch {}
   }
+});
+const notifier = createApprovalNotifier({
+  Notification,
+  getWindow: () => window,
+  isSupported: () => process.platform === 'win32' && Notification.isSupported(),
+  isPending: ({ instanceId, requestId }) => manager.instances.get(instanceId)?.approvals.has(requestId)
 });
 
 function handle(action, callback) {
@@ -27,6 +40,8 @@ function handle(action, callback) {
 }
 
 app.whenReady().then(() => {
+  if (process.platform === 'win32') app.setAppUserModelId(process.execPath);
+  const profiles = new ProfileStore(path.join(app.getPath('userData'), 'project-profiles.json'));
   handle('pick-folder', async () => {
     const result = await dialog.showOpenDialog(window, { title: 'Choose a Bridge project', properties: ['openDirectory'] });
     if (result.canceled) return null;
@@ -37,7 +52,14 @@ app.whenReady().then(() => {
   handle('list', () => manager.list());
   handle('start', data => {
     if (!selectedFolders.has(data?.folder)) throw new Error('Choose a project folder first.');
-    return manager.start(data);
+    return manager.start({ folder: data.folder, port: data.port });
+  });
+  handle('list-profiles', () => profiles.list());
+  handle('save-profile', data => profiles.save(data, folder => selectedFolders.has(folder)));
+  handle('delete-profile', id => profiles.delete(id));
+  handle('start-profile', id => {
+    const { folder, port, name } = profiles.get(id);
+    return manager.start({ folder, port, profileName: name });
   });
   handle('stop', id => manager.stop(id));
   handle('copy-url', id => { clipboard.writeText(manager.urlForCopy(id)); });

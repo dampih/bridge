@@ -152,6 +152,10 @@ npm --prefix desktop start
 
 Choose a project folder and a free port (for example, `3101`), then click **Start public tunnel**. Repeat with another folder and port (for example, `3102`). When an instance is online, copy its authenticated MCP URL and paste it into the corresponding AI connector. Keep the URL private: it includes that instance’s access token. Each start creates a new temporary URL. Desktop does not use saved named tunnels.
 
+Use **Project profiles** to save a name, folder, and port for a project you use often. Profiles are restored when you reopen the app, but never start automatically. Click **Start public tunnel** on a saved profile to launch it. Edits and deletions affect only the saved profile, not a running instance. Profiles do not store URLs, tokens, or approval modes.
+
+When Bridge Desktop is not focused, it can show a Windows notification for a new approval request. Click it to return to the corresponding instance card; the notification itself cannot approve or deny anything. If Windows suppresses notifications (for example, due to notification settings or Do Not Disturb), review pending requests in the dashboard.
+
 Every desktop instance starts in **Review**. Use the **Approval mode** dropdown on an online instance to switch between Review, Default, Auto, and Turbo without restarting or affecting other instances. **Turbo** requires confirmation because it stops asking for approval on new actions; pending requests still need a decision. Mode changes are not saved for future launches.
 
 Only start a public tunnel for a workspace you intend to share with a trusted AI connector. Click **Stop** to close one instance, or close the window to stop all desktop-managed instances.

@@ -9,6 +9,19 @@ const portInput = $('#port');
 const nextPortButton = $('#next-port');
 const launchButton = $('#start-tunnel');
 const launchFeedback = $('#launch-feedback');
+const profileList = $('#profile-list');
+const profileTemplate = $('#profile-template');
+const profilesEmpty = $('#profiles-empty');
+const profilesFeedback = $('#profiles-feedback');
+const newProfileButton = $('#new-profile');
+const profileForm = $('#profile-form');
+const profileNameInput = $('#profile-name');
+const profileFolderOutput = $('#profile-folder');
+const profileFolderButton = $('#pick-profile-folder');
+const profilePortInput = $('#profile-port');
+const saveProfileButton = $('#save-profile');
+const cancelProfileButton = $('#cancel-profile');
+const profileFormFeedback = $('#profile-form-feedback');
 const syncFeedback = $('#sync-feedback');
 const instanceList = $('#instance-list');
 const instanceTemplate = $('#instance-template');
@@ -45,6 +58,13 @@ let selectedFolder = null;
 let picking = false;
 let starting = false;
 let announcingFrame;
+let pendingInstanceFocus;
+let profilesReady = false;
+let editingProfileId;
+let profileFolder = null;
+let profilePicking = false;
+let profileBusy = false;
+let editorReturnFocus;
 
 function safeText(value) {
   if (typeof value !== 'string' && typeof value !== 'number') return '';
@@ -91,7 +111,7 @@ function folderName(folder) {
 }
 
 function updateLaunchControls() {
-  unavailable(folderButton, !connected || picking || starting);
+  unavailable(folderButton, !connected || picking || profilePicking || starting);
   unavailable(launchButton, !connected || !selectedFolder || picking || starting);
   text(folderButton, picking ? 'Choosing folder…' : selectedFolder ? 'Change folder' : 'Choose folder');
   text(launchButton, starting ? 'Starting…' : 'Start public tunnel');
@@ -121,9 +141,10 @@ function suggestPort(from, reserved) {
 }
 
 folderButton.addEventListener('click', async () => {
-  if (!connected || picking || starting) return;
+  if (!connected || picking || profilePicking || starting) return;
   picking = true;
   updateLaunchControls();
+  updateProfileControls();
   message(launchFeedback, '');
   try {
     const folder = await bridge.pickFolder();
@@ -137,6 +158,7 @@ folderButton.addEventListener('click', async () => {
   } finally {
     picking = false;
     updateLaunchControls();
+    updateProfileControls();
   }
 });
 
@@ -165,6 +187,189 @@ launchForm.addEventListener('submit', async (event) => {
     updateLaunchControls();
   }
 });
+
+function updateProfileControls() {
+  const editorOpen = !profileForm.hidden;
+  const manageDisabled = !profilesReady || profileBusy || editorOpen;
+  unavailable(newProfileButton, manageDisabled);
+  unavailable(profileFolderButton, profileBusy || profilePicking || picking);
+  unavailable(saveProfileButton, profileBusy || profilePicking || !profileFolder);
+  unavailable(cancelProfileButton, profileBusy || profilePicking);
+  for (const button of profileList.querySelectorAll('.edit-profile, .delete-profile')) {
+    unavailable(button, manageDisabled);
+  }
+  for (const button of profileList.querySelectorAll('.start-profile')) {
+    unavailable(button, profileBusy);
+  }
+}
+
+function updateProfileFolder() {
+  text(profileFolderOutput, safeText(profileFolder) || 'No folder selected');
+  text(profileFolderButton, profilePicking ? 'Choosing folder…' : profileFolder ? 'Change folder' : 'Choose folder');
+}
+
+function showProfileEditor(profile, trigger) {
+  if (!profilesReady || profileBusy || !profileForm.hidden) return;
+  editorReturnFocus = trigger;
+  editingProfileId = profile?.id;
+  profileFolder = profile?.folder ?? null;
+  profileNameInput.value = profile?.name ?? '';
+  profilePortInput.value = String(profile?.port ?? nextAvailablePort(defaultPort) ?? defaultPort);
+  text($('#profile-form-title'), profile ? 'Edit profile' : 'New profile');
+  updateProfileFolder();
+  message(profilesFeedback, '');
+  message(profileFormFeedback, '');
+  profileForm.hidden = false;
+  newProfileButton.setAttribute('aria-expanded', 'true');
+  updateProfileControls();
+  profileNameInput.focus();
+}
+
+function closeProfileEditor() {
+  profileForm.hidden = true;
+  newProfileButton.setAttribute('aria-expanded', 'false');
+  const trigger = editorReturnFocus?.isConnected ? editorReturnFocus : newProfileButton;
+  editorReturnFocus = undefined;
+  updateProfileControls();
+  trigger.focus();
+}
+
+function renderProfiles(profiles) {
+  const list = document.createDocumentFragment();
+  profiles.forEach((profile, index) => {
+    const root = profileTemplate.content.firstElementChild.cloneNode(true);
+    const heading = $('.profile-name', root);
+    const start = $('.start-profile', root);
+    const edit = $('.edit-profile', root);
+    const remove = $('.delete-profile', root);
+    const name = safeText(profile.name) || 'Project';
+    heading.id = `profile-heading-${index}`;
+    text(heading, name);
+    text($('.profile-location', root), safeText(profile.folder));
+    text($('.profile-port', root), safeText(profile.port));
+    for (const [action, button] of [['start', start], ['edit', edit], ['delete', remove]]) {
+      button.id = `profile-${action}-${index}`;
+      button.setAttribute('aria-labelledby', `${button.id} ${heading.id}`);
+    }
+    const feedback = $('.profile-feedback', root);
+    start.addEventListener('click', () => startSavedProfile(profile.id, start, feedback));
+    edit.addEventListener('click', () => showProfileEditor(profile, edit));
+    remove.addEventListener('click', () => deleteSavedProfile(profile.id, name, feedback));
+    list.append(root);
+  });
+  profileList.replaceChildren(list);
+  profileList.hidden = profiles.length === 0;
+  text(profilesEmpty, 'No saved profiles yet.');
+  profilesEmpty.hidden = profiles.length > 0;
+  updateProfileControls();
+}
+
+async function startSavedProfile(id, button, feedback) {
+  if (profileBusy) return;
+  profileBusy = true;
+  updateProfileControls();
+  text(button, 'Starting…');
+  message(feedback, '');
+  try {
+    await bridge.startProfile(id);
+    message(feedback, 'Tunnel start requested. See Tunnel instances for its status.', true);
+  } catch (error) {
+    message(feedback, errorMessage(error, 'Could not start the public tunnel.'));
+  } finally {
+    profileBusy = false;
+    text(button, 'Start public tunnel');
+    updateProfileControls();
+  }
+}
+
+async function deleteSavedProfile(id, name, feedback) {
+  if (profileBusy || !profileForm.hidden) return;
+  if (!window.confirm(`Delete the saved profile “${name}”? Running tunnels will not be stopped.`)) return;
+  profileBusy = true;
+  updateProfileControls();
+  message(feedback, '');
+  message(profilesFeedback, '');
+  try {
+    const profiles = await bridge.deleteProfile(id);
+    const restoreFocus = profileList.contains(document.activeElement);
+    renderProfiles(profiles);
+    if (restoreFocus) newProfileButton.focus();
+    message(profilesFeedback, 'Profile deleted.', true);
+  } catch (error) {
+    message(feedback, errorMessage(error, 'Could not delete the profile.'));
+  } finally {
+    profileBusy = false;
+    updateProfileControls();
+  }
+}
+
+newProfileButton.addEventListener('click', () => showProfileEditor(null, newProfileButton));
+cancelProfileButton.addEventListener('click', () => {
+  if (!profileBusy && !profilePicking) closeProfileEditor();
+});
+
+profileFolderButton.addEventListener('click', async () => {
+  if (profileBusy || profilePicking || picking) return;
+  profilePicking = true;
+  updateProfileFolder();
+  updateProfileControls();
+  updateLaunchControls();
+  message(profileFormFeedback, '');
+  try {
+    const folder = await bridge.pickFolder();
+    if (typeof folder === 'string' && folder) {
+      profileFolder = folder;
+      announce(`Selected folder: ${safeText(folder)}.`);
+    }
+  } catch (error) {
+    message(profileFormFeedback, errorMessage(error, 'Could not open the folder picker.'));
+  } finally {
+    profilePicking = false;
+    updateProfileFolder();
+    updateProfileControls();
+    updateLaunchControls();
+  }
+});
+
+profileForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (profileForm.hidden || profileBusy || profilePicking || !profileForm.reportValidity()) return;
+  const name = profileNameInput.value.trim();
+  if (!name || !profileFolder) {
+    message(profileFormFeedback, !name ? 'Enter a profile name.' : 'Choose a workspace folder.');
+    (!name ? profileNameInput : profileFolderButton).focus();
+    return;
+  }
+  const data = { name, folder: profileFolder, port: profilePortInput.valueAsNumber };
+  if (editingProfileId !== undefined) data.id = editingProfileId;
+  profileBusy = true;
+  updateProfileControls();
+  text(saveProfileButton, 'Saving…');
+  message(profileFormFeedback, '');
+  try {
+    renderProfiles(await bridge.saveProfile(data));
+    closeProfileEditor();
+    message(profilesFeedback, 'Profile saved.', true);
+  } catch (error) {
+    message(profileFormFeedback, errorMessage(error, 'Could not save the profile.'));
+  } finally {
+    profileBusy = false;
+    text(saveProfileButton, 'Save profile');
+    updateProfileControls();
+  }
+});
+
+async function loadProfiles() {
+  try {
+    const profiles = await bridge.listProfiles();
+    renderProfiles(profiles);
+    profilesReady = true;
+    updateProfileControls();
+  } catch (error) {
+    profilesEmpty.hidden = true;
+    message(profilesFeedback, errorMessage(error, 'Could not load saved profiles.'));
+  }
+}
 
 function renderLogs(card, entries) {
   const logs = Array.isArray(entries) ? entries : [];
@@ -311,7 +516,7 @@ function renderCard(card) {
   const folder = safeText(instance.folder);
   const copyVisible = state === 'online' && Boolean(instance.publicUrl);
   const stopVisible = stoppable.has(state) || state === 'stopping';
-  text(card.name, folderName(folder));
+  text(card.name, safeText(instance.profileName) || folderName(folder));
   text(card.folder, folder || 'Folder unavailable');
   text(card.port, safeText(instance.port));
   text(card.status, statuses.get(state) || 'Unknown');
@@ -385,6 +590,15 @@ async function stopInstance(card) {
   }
 }
 
+function focusInstance(id) {
+  pendingInstanceFocus = id;
+  const root = cards.get(id)?.root;
+  if (!root?.isConnected) return;
+  pendingInstanceFocus = undefined;
+  root.focus({ preventScroll: true });
+  root.scrollIntoView({ block: 'nearest' });
+}
+
 function applySnapshot(instances) {
   if (!Array.isArray(instances)) return;
   snapshotVersion++;
@@ -432,6 +646,7 @@ function applySnapshot(instances) {
   const count = $('#instance-count');
   text(count, `${active} active / ${cards.size} total`);
   count.hidden = false;
+  if (pendingInstanceFocus !== undefined) focusInstance(pendingInstanceFocus);
   if (changes.length) announce(changes.join(' '));
 }
 
@@ -439,14 +654,20 @@ async function initialize() {
   if (!bridge) {
     message(syncFeedback, 'This dashboard needs the Bridge desktop app.');
     text($('#empty-title'), 'Tunnel instances unavailable');
+    text(profilesEmpty, 'Saved profiles are available in the Bridge desktop app.');
     return;
   }
+  void loadProfiles();
   try {
     const version = snapshotVersion;
     const unsubscribe = bridge.onChange(applySnapshot);
-    window.addEventListener('pagehide', () => unsubscribe(), { once: true });
+    window.addEventListener('pagehide', unsubscribe, { once: true });
     connected = true;
     updateLaunchControls();
+    if (bridge.onFocusInstance) {
+      const unsubscribeFocus = bridge.onFocusInstance(focusInstance);
+      window.addEventListener('pagehide', unsubscribeFocus, { once: true });
+    }
     const instances = await bridge.list();
     if (version === snapshotVersion) applySnapshot(instances);
   } catch (error) {

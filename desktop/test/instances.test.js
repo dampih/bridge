@@ -63,7 +63,9 @@ test('desktop manages two isolated MCP servers, approvals, conflicts and shutdow
   const env = { ...process.env };
   process.env.HOME = home;
   process.env.USERPROFILE = home;
+  const approvalEvents = [];
   const manager = new InstanceManager({
+    onApproval: target => approvalEvents.push(target),
     resolveTunnel: () => 'mock-cloudflared',
     startTunnel(binary, args) {
       assert.equal(binary, 'mock-cloudflared');
@@ -93,11 +95,12 @@ test('desktop manages two isolated MCP servers, approvals, conflicts and shutdow
     return item.status === 'online' && item;
   });
   assert.throws(() => manager.start({ folder: folders[0], port: 0 }), /1 to 65535/);
-  const a = manager.start({ folder: folders[0], port: portA });
+  const a = manager.start({ folder: folders[0], port: portA, profileName: 'Frontend' });
   assert.throws(() => manager.start({ folder: folders[1], port: portA }), /already assigned/);
   const b = manager.start({ folder: folders[1], port: portB });
   const busy = manager.start({ folder: folders[0], port: busyPort });
   await Promise.all([online(a), online(b), waitFor(() => get(busy).status === 'failed')]);
+  assert.equal(get(a).profileName, 'Frontend');
   assert.equal(get(a).approvalMode, 'review');
   assert.equal(get(b).approvalMode, 'review');
   assert.throws(() => manager.setApprovalMode({ instanceId: a, mode: 'invalid' }), /Invalid approval mode/);
@@ -128,6 +131,10 @@ test('desktop manages two isolated MCP servers, approvals, conflicts and shutdow
   writeResults.catch(() => {});
   const [approvalA, approvalB] = await Promise.all([a, b].map(id => waitFor(() => get(id).approvals[0])));
   assert.equal(approvalA.id, approvalB.id, 'Approval IDs are scoped to each server');
+  assert.deepEqual(approvalEvents.sort((x, y) => x.port - y.port), [
+    { instanceId: a, requestId: approvalA.id, port: portA },
+    { instanceId: b, requestId: approvalB.id, port: portB }
+  ].sort((x, y) => x.port - y.port));
   await manager.setApprovalMode({ instanceId: a, mode: 'default' });
   assert.equal(get(a).approvalMode, 'default');
   assert.equal(get(b).approvalMode, 'review');
